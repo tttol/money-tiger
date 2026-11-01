@@ -97,9 +97,9 @@
 
     <dialog id="category-details-dialog" class="details-dialog" aria-labelledby="details-title">
       <div class="dialog-shell">
-        <header class="dialog-heading"><div><p class="eyebrow">{{ selected_kind }}の内訳</p><h2 id="details-title">カテゴリの明細</h2></div><button type="button" class="dialog-close" data-close-details aria-label="明細を閉じる" autofocus>×</button></header>
+        <header class="dialog-heading"><h2 id="details-title">カテゴリの明細</h2><button type="button" class="dialog-close" data-close-details aria-label="明細を閉じる" autofocus><img src="{{ url_for('static', filename='icons/x-lg.svg') }}" width="24" height="24" alt=""></button></header>
         <div id="details-body" class="details-body"></div>
-        <footer class="dialog-footer"><span>グラフと同じ集計対象の明細のみを表示しています。</span><span>Escキーでも閉じられます</span></footer>
+        <footer class="dialog-footer"><span>同名の明細は同じ行に表示しています</span><span>明細名をクリックすると全文を表示</span></footer>
       </div>
     </dialog>
 

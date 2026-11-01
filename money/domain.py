@@ -1,10 +1,11 @@
 """Immutable monthly totals and comparison rules, independent of the web UI."""
 
 from dataclasses import dataclass
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
-from itertools import groupby
+from itertools import groupby, zip_longest
 from math import ceil
 
 
@@ -142,6 +143,14 @@ class DescriptionComparison:
 
 
 @dataclass(frozen=True)
+class DetailRow:
+    """Two individual transactions on a shared ledger baseline; either may be absent."""
+
+    previous: Transaction | None
+    current: Transaction | None
+
+
+@dataclass(frozen=True)
 class Comparison:
     """One ordered month pair and its direction-specific category charts."""
 
@@ -162,6 +171,31 @@ class Comparison:
         return tuple(sorted(matched, key=lambda item: (
             -abs(item.change.amount), -max(item.previous_total, item.current_total), item.description,
         )))
+
+    def detail_rows(self, category: str) -> tuple[DetailRow, ...]:
+        """Align same-name occurrences and zip remaining unmatched transactions.
+
+        Names follow the previous CSV's first appearance, with current-only rows
+        filling unmatched positions. Extra occurrences of a shared name retain
+        blank opposite cells, and each source transaction appears exactly once.
+        """
+        previous = _ledger_groups(self.previous, self.kind, category)
+        current = _ledger_groups(self.current, self.kind, category)
+        shared = previous.keys() & current.keys()
+        previous_only = tuple(row for name, rows in previous.items() if name not in shared for row in rows)
+        current_only = tuple(row for name, rows in current.items() if name not in shared for row in rows)
+        unmatched = tuple(DetailRow(a, b) for a, b in zip_longest(previous_only, current_only))
+        rows: list[DetailRow] = []
+        inserted_unmatched = False
+        for name, transactions in previous.items():
+            if name in shared:
+                rows.extend(DetailRow(a, b) for a, b in zip_longest(transactions, current[name]))
+            elif not inserted_unmatched:
+                rows.extend(unmatched)
+                inserted_unmatched = True
+        if not inserted_unmatched:
+            rows.extend(unmatched)
+        return tuple(rows)
 
 
 def change_between(previous: int, current: int) -> Change:
@@ -197,3 +231,11 @@ def _category(previous: Month, current: Month, kind: Kind, name: str) -> Categor
 def _group_details(transactions: tuple[Transaction, ...]) -> dict[str, tuple[Transaction, ...]]:
     ordered = sorted(transactions, key=lambda item: item.description)
     return {name: tuple(rows) for name, rows in groupby(ordered, key=lambda item: item.description)}
+
+
+def _ledger_groups(month: Month, kind: Kind, category: str) -> dict[str, tuple[Transaction, ...]]:
+    grouped: defaultdict[str, list[Transaction]] = defaultdict(list)
+    for transaction in month.transactions:
+        if transaction.kind == kind and transaction.category == category:
+            grouped[transaction.description].append(transaction)
+    return {name: tuple(sorted(rows, key=lambda item: item.day)) for name, rows in grouped.items()}

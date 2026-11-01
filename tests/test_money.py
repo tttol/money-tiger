@@ -10,7 +10,7 @@ import pytest
 from PIL import Image
 
 from money.csv_source import CsvError, parse_csv
-from money.domain import CategoryTotal, Change, DescriptionComparison, Kind, Month, Transaction, change_between, compare
+from money.domain import CategoryTotal, Change, DescriptionComparison, DetailRow, Kind, Month, Transaction, change_between, compare
 from money.repository import Catalog, CsvRepository, Source, default_pair
 from money.web import create_app
 
@@ -429,7 +429,7 @@ def test_alignment_for_absent_category_is_empty(detailed_month: Month) -> None:
     assert actual == expected
 
 
-def test_modal_renders_matching_names_in_one_shared_group(tmp_path: Path) -> None:
+def test_modal_renders_matching_names_as_individual_ledger_rows(tmp_path: Path) -> None:
     # GIVEN
     headers = tuple(HEADERS) + ("内容", "中項目", "メモ")
     (tmp_path / "september.csv").write_bytes(csv_bytes([
@@ -444,7 +444,77 @@ def test_modal_renders_matching_names_in_one_shared_group(tmp_path: Path) -> Non
     response = client.get("/")
     # THEN
     assert response.status_code == 200
-    assert response.text.count('<section class="matched-group"') == 1
-    assert response.text.count('<section class="paired-month"') == 2
-    assert response.text.count("<h4>同じ店</h4>") == 1
+    assert response.text.count('class="ledger-row"') == 2
+    assert response.text.count('class="ledger-entry"') == 3
+    assert response.text.count('class="ledger-cell ledger-blank"') == 1
+    assert 'class="matched-group"' not in response.text
+    assert response.text.count('<details class="ledger-description">') == 3
     assert all(value in response.text for value in ["300円", "500円", "200円増", "先月のメモ", "今月のメモ", "2回目", "2026/09/02", "2026/09/03", "2026/10/05"])
+
+
+def test_ledger_rows_follow_the_requested_supermarket_example() -> None:
+    # GIVEN
+    headers = tuple(HEADERS) + ("内容",)
+    previous = parse_csv(csv_bytes([
+        ["1", "2026/09/20", "-1000", "日用品", "0", "a", "スーパー"],
+        ["1", "2026/09/29", "-300", "日用品", "0", "b", "百均"],
+        ["1", "2026/09/29", "-800", "日用品", "0", "c", "あああ"],
+    ], headers=headers))
+    current = parse_csv(csv_bytes([
+        ["1", "2026/10/03", "-1200", "日用品", "0", "d", "スーパー"],
+        ["1", "2026/10/06", "-300", "日用品", "0", "e", "スーパー"],
+        ["1", "2026/10/09", "-500", "日用品", "0", "f", "百均"],
+        ["1", "2026/10/23", "-900", "日用品", "0", "g", "いいい"],
+    ], headers=headers))
+    comparison = compare(previous, current, Kind.EXPENSE)
+    a, b, c = previous.transactions
+    d, e, f, g = current.transactions
+    expected = (DetailRow(a, d), DetailRow(None, e), DetailRow(b, f), DetailRow(c, g))
+    # WHEN
+    actual = comparison.detail_rows("日用品")
+    # THEN
+    assert actual == expected
+    assert sum(row.previous.amount for row in actual if row.previous is not None) == 2100
+    assert sum(row.current.amount for row in actual if row.current is not None) == 2900
+
+
+@pytest.mark.parametrize(("left", "right", "expected"), [
+    ((100, 200), (300,), ((100, 300), (200, None))),
+    ((100,), (200, 300), ((100, 200), (None, 300))),
+    ((), (0,), ((None, 0),)),
+    ((0,), (), ((0, None),)),
+])
+def test_ledger_preserves_extra_occurrences_and_zero_income(left: tuple[int, ...], right: tuple[int, ...], expected: tuple[tuple[int | None, int | None], ...]) -> None:
+    # GIVEN
+    a = Month("2026-09", (), len(left), len(left), date(2026, 9, 30), tuple(Transaction(date(2026, 9, 20), Kind.INCOME, "収入", value, "同名") for value in left))
+    b = Month("2026-10", (), len(right), len(right), date(2026, 10, 31), tuple(Transaction(date(2026, 10, 20), Kind.INCOME, "収入", value, "同名") for value in right))
+    comparison = compare(a, b, Kind.INCOME)
+    # WHEN
+    actual = comparison.detail_rows("収入")
+    # THEN
+    assert tuple((row.previous.amount if row.previous is not None else None, row.current.amount if row.current is not None else None) for row in actual) == expected
+
+
+def test_ledger_orders_same_name_occurrences_by_date_and_keeps_metadata() -> None:
+    # GIVEN
+    older = Transaction(date(2026, 9, 10), Kind.EXPENSE, "食費", 100, "スーパー", "食料品", "古いメモ")
+    newer = Transaction(date(2026, 9, 20), Kind.EXPENSE, "食費", 200, "スーパー", "外食", "新しいメモ")
+    a = Month("2026-09", (), 2, 2, date(2026, 9, 20), (newer, older))
+    b = Month("2026-10", (), 0, 0, date(2026, 10, 31))
+    comparison = compare(a, b, Kind.EXPENSE)
+    expected = (DetailRow(older, None), DetailRow(newer, None))
+    # WHEN
+    actual = comparison.detail_rows("食費")
+    # THEN
+    assert actual == expected
+
+
+def test_ledger_filters_direction_and_category(detailed_month: Month) -> None:
+    # GIVEN
+    b = Month("2026-10", (), 0, 0, date(2026, 10, 31))
+    comparison = compare(detailed_month, b, Kind.INCOME)
+    expected = (DetailRow(Transaction(date(2026, 9, 6), Kind.INCOME, "食費", 137, "返金", "食料品", "返金のメモ"), None),)
+    # WHEN
+    actual = comparison.detail_rows("食費")
+    # THEN
+    assert actual == expected
