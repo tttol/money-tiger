@@ -1,0 +1,39 @@
+<div class="detail-change {{ category.change.tone }}">
+  <p>比較元からの増減</p><strong>{{ category.change.label }}</strong><span>({{ category.change.rate_label }})</span>
+</div>
+<p class="detail-order">「内容」が同じ明細を横並びで表示しています。差額が大きい順に並べ、同名の明細が複数ある場合は月ごとにまとめています。</p>
+<div class="detail-months detail-overview">
+  {% for label, month, total in [('比較元', comparison.previous, category.previous), ('比較先', comparison.current, category.current)] %}
+  {% set transactions = month.details(selected_kind, category.category) %}
+  <section class="detail-month" aria-label="{{ month.label }}の明細">
+    <div class="detail-month-heading"><div><span class="detail-month-role">{{ label }}</span><h3>{{ month.label }}</h3></div><div class="detail-month-total"><strong>{{ total|yen }}<small>円</small></strong><span>{{ transactions|length }}件の明細</span></div></div>
+    {% if not transactions %}<p class="no-transactions">この月に該当する明細はありません。</p>{% endif %}
+  </section>
+  {% endfor %}
+</div>
+<div class="matched-details">
+  {% for group in comparison.details(category.category) %}
+  <section class="matched-group" aria-label="{{ group.description }}の月別比較">
+    <div class="matched-heading"><h4>{{ group.description }}</h4><span class="matched-change {{ group.change.tone }}">{{ group.change.label }}</span></div>
+    <div class="paired-months">
+      {% for label, month, transactions, total in [('比較元', comparison.previous, group.previous, group.previous_total), ('比較先', comparison.current, group.current, group.current_total)] %}
+      <section class="paired-month" aria-label="{{ month.label }}の{{ group.description }}">
+        <p class="paired-label">{{ month.label }} <span>{{ label }}</span></p>
+        <div class="paired-total"><strong>{{ total|yen }}円</strong><span>{{ transactions|length }}件</span></div>
+        {% if transactions %}
+        <ul class="transaction-list">
+          {% for transaction in transactions %}
+          <li>
+            <div class="transaction-heading"><time datetime="{{ transaction.day.isoformat() }}">{{ transaction.day.strftime('%Y/%m/%d') }}</time><strong>{{ transaction.amount|yen }}円</strong></div>
+            {% if transaction.subcategory %}<p class="transaction-meta">中項目：{{ transaction.subcategory }}</p>{% endif %}
+            {% if transaction.memo %}<p class="transaction-meta transaction-memo">メモ：{{ transaction.memo }}</p>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}<p class="unmatched-detail">この月の明細なし</p>{% endif %}
+      </section>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</div>

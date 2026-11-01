@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="このPC内の家計CSVを使って、カテゴリごとの月次収支を比較します。">
+  <title>家計の月次比較 | Money</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="{{ url_for('static', filename='details.js') }}" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="{{ url_for('index') }}" aria-label="Money ホーム">
+      <svg viewBox="0 0 32 32" width="32" height="32" aria-hidden="true"><rect width="32" height="32" rx="9" class="brand-bg"/><path d="M9 23V16M16 23V9M23 23V13" class="brand-mark"/></svg>
+      <span>Money<span class="brand-caption">家計の月次比較</span></span>
+    </a>
+    <span class="local-status"><span class="status-dot"></span>このPC内で処理</span>
+  </header>
+
+  <main>
+    <div class="page-heading">
+      <div><p class="eyebrow">家計レポート</p><h1>月ごとの収支を比較</h1><p class="intro">2か月のCSVから、お金の動きをカテゴリ別に見比べます。</p></div>
+      <a class="button secondary" href="#import">＋ CSVを追加</a>
+    </div>
+
+    {% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
+    {% for warning in catalog.warnings %}<div class="notice warning" role="status">読み込みをスキップしました：{{ warning }}</div>{% endfor %}
+
+    <section class="comparison-controls" aria-label="比較する月を選択">
+      <form action="{{ url_for('index') }}" method="get" class="month-form">
+        <input type="hidden" name="kind" value="{{ kind_key }}">
+        <div class="field"><label for="previous">比較元の月</label><select id="previous" name="previous" required>
+          <option value="" disabled {% if not previous %}selected{% endif %}>CSVを選択</option>
+          {% for source in catalog.sources %}<option value="{{ source.name }}" {% if previous == source.name %}selected{% endif %}>{{ source.month.label }} — {{ source.name }}</option>{% endfor %}
+        </select></div>
+        <span class="month-arrow" aria-hidden="true">→</span>
+        <div class="field"><label for="current">比較先の月</label><select id="current" name="current" required>
+          <option value="" disabled {% if not current %}selected{% endif %}>CSVを選択</option>
+          {% for source in catalog.sources %}<option value="{{ source.name }}" {% if current == source.name %}selected{% endif %}>{{ source.month.label }} — {{ source.name }}</option>{% endfor %}
+        </select></div>
+        <button class="button primary" type="submit">比較する <span aria-hidden="true">→</span></button>
+      </form>
+      <p class="control-note">新しい月のCSVを追加すると、直近の2か月を自動で表示します。</p>
+    </section>
+
+    {% if comparison %}
+    <nav class="tabs" aria-label="表示する収支区分">
+      <a href="{{ url_for('index', previous=previous, current=current, kind='expense') }}" class="tab {% if kind_key == 'expense' %}active{% endif %}" {% if kind_key == 'expense' %}aria-current="page"{% endif %}>支出</a>
+      <a href="{{ url_for('index', previous=previous, current=current, kind='income') }}" class="tab {% if kind_key == 'income' %}active{% endif %}" {% if kind_key == 'income' %}aria-current="page"{% endif %}>収入</a>
+    </nav>
+
+    <section class="summary" aria-label="{{ selected_kind }}合計の比較">
+      <div class="summary-card"><p>{{ comparison.previous.label }} <span>比較元</span></p><strong>{{ comparison.previous.amount(selected_kind)|yen }}<small>円</small></strong><p class="summary-meta">{{ selected_kind }}合計</p></div>
+      <div class="summary-card"><p>{{ comparison.current.label }} <span>比較先</span></p><strong>{{ comparison.current.amount(selected_kind)|yen }}<small>円</small></strong><p class="summary-meta">{{ selected_kind }}合計</p></div>
+      <div class="summary-card change-card {{ comparison.change.tone }}"><p>比較元からの増減</p><strong>{{ comparison.change.label }}</strong><p class="summary-meta">{{ comparison.change.rate_label }}</p></div>
+    </section>
+
+    <section class="chart-section" aria-labelledby="chart-title">
+      <div class="section-heading"><div><h2 id="chart-title">カテゴリ別の{{ selected_kind }}</h2><p>{{ comparison.categories|length }}カテゴリ · 2か月の最大金額が大きい順</p></div>
+        {% if comparison.categories %}<a class="button secondary download" href="{{ url_for('download', kind_key=kind_key, previous=previous, current=current) }}">↓ グラフをPNGで保存</a>{% endif %}
+      </div>
+      <div class="chart-guide"><div class="legend"><span><i class="swatch previous"></i>比較元</span><span><i class="swatch more"></i>比較先：増加</span><span><i class="swatch less"></i>比較先：減少</span><span><i class="swatch same"></i>比較先：同額</span></div><p>縦軸：千円単位</p></div>
+      <p class="axis-note">カテゴリごとに縦軸の縮尺が異なります。同カテゴリの2か月は同じ縮尺です。</p>
+      <p class="coverage-note">CSVの最終明細日：比較元 {{ comparison.previous.last_date.strftime('%Y/%m/%d') }} ／ 比較先 {{ comparison.current.last_date.strftime('%Y/%m/%d') }}</p>
+      <p class="details-guide">グラフをクリックすると、2か月分の明細を確認できます。</p>
+      <div class="chart-grid">
+      {% for category in comparison.categories %}
+        <article class="chart-card">
+          <div class="card-heading"><h3>{{ category.category }}{% if selected_kind.value == '収入' and category.category == '未分類' %}<span class="category-note">（入金）</span>{% endif %}</h3><span class="direction {{ category.change.tone }}">{% if category.change.amount > 0 %}増加{% elif category.change.amount < 0 %}減少{% else %}同額{% endif %}</span></div>
+          <p class="category-change {{ category.change.tone }}">{{ category.change.label }} <span>({{ category.change.rate_label }})</span></p>
+          <svg class="bar-chart" viewBox="0 0 440 245" role="img" aria-label="{{ category.category }}：{{ comparison.previous.label }} {{ category.previous|yen }}円、{{ comparison.current.label }} {{ category.current|yen }}円、{{ category.change.label }}">
+            <text x="14" y="17" class="chart-unit">千円</text>
+            {% for tick in category.ticks %}{% set y = 201 - tick / category.top * 155 %}
+            <line x1="58" y1="{{ y }}" x2="425" y2="{{ y }}" class="grid-line"/>
+            <text x="45" y="{{ y + 5 }}" text-anchor="end" class="tick">{{ tick|yen }}</text>
+            {% endfor %}
+            {% set a_height = category.previous / 1000 / category.top * 155 %}
+            {% set b_height = category.current / 1000 / category.top * 155 %}
+            <rect x="118" y="{{ 201 - a_height }}" width="68" height="{{ a_height }}" class="bar previous"/>
+            <rect x="288" y="{{ 201 - b_height }}" width="68" height="{{ b_height }}" class="bar {{ category.change.tone }}"/>
+            {% if not category.previous %}<line x1="118" y1="200" x2="186" y2="200" class="zero previous"/>{% endif %}
+            {% if not category.current %}<line x1="288" y1="200" x2="356" y2="200" class="zero {{ category.change.tone }}"/>{% endif %}
+            <text x="152" y="{{ 201 - a_height - 12 }}" text-anchor="middle" class="bar-value">{{ category.previous|yen }}円</text>
+            <text x="322" y="{{ 201 - b_height - 12 }}" text-anchor="middle" class="bar-value">{{ category.current|yen }}円</text>
+            <text x="152" y="230" text-anchor="middle" class="month-label">{{ comparison.previous.label }}</text>
+            <text x="322" y="230" text-anchor="middle" class="month-label">{{ comparison.current.label }}</text>
+          </svg>
+          <button class="chart-trigger" type="button" data-details-template="category-details-{{ loop.index }}" data-category="{{ category.category }}" aria-label="{{ category.category }}の明細を表示" aria-haspopup="dialog" aria-controls="category-details-dialog"><span class="details-hint">明細を見る <span aria-hidden="true">↗</span></span></button>
+        </article>
+        <template id="category-details-{{ loop.index }}">
+          {% include 'category_details.html' %}
+        </template>
+      {% else %}<div class="empty-state"><h3>この区分の明細はありません</h3><p>もう一方のタブ、または別の月を選んでください。</p></div>{% endfor %}
+      </div>
+    </section>
+
+    <dialog id="category-details-dialog" class="details-dialog" aria-labelledby="details-title">
+      <div class="dialog-shell">
+        <header class="dialog-heading"><div><p class="eyebrow">{{ selected_kind }}の内訳</p><h2 id="details-title">カテゴリの明細</h2></div><button type="button" class="dialog-close" data-close-details aria-label="明細を閉じる" autofocus>×</button></header>
+        <div id="details-body" class="details-body"></div>
+        <footer class="dialog-footer"><span>グラフと同じ集計対象の明細のみを表示しています。</span><span>Escキーでも閉じられます</span></footer>
+      </div>
+    </dialog>
+
+    <details class="source-details"><summary>集計条件と使用したCSV</summary>
+      <div class="source-body"><p>「大項目」ごとに集計しています。「計算対象」が1かつ「振替」が0の明細のみを含め、マイナス金額を支出、0以上の金額を収入として扱います。支出は正の金額で表示し、カテゴリの明細がない月は0円とします。</p>
+        <p>CSVに記録された金額を比較します。最終明細日は月末までのデータがすべて揃っていることを保証するものではありません。</p>
+        <div class="source-grid">{% for label, month, name in [('比較元', comparison.previous, previous), ('比較先', comparison.current, current)] %}<div><strong>{{ label }}：{{ month.label }}</strong><p class="filename">{{ name }}</p><p>集計対象 {{ month.included }}件 ／ 除外 {{ month.rows - month.included }}件</p><p>最終明細日 {{ month.last_date.strftime('%Y/%m/%d') }}</p></div>{% endfor %}</div>
+      </div>
+    </details>
+    {% elif not error %}
+    <section class="empty-state"><h2>2か月分のCSVを追加してください</h2><p>1ファイルに1か月分の収支が入った、マネーフォワード形式のCSVに対応しています。</p><p>既存CSVは <code>money_forward_csv/</code> フォルダからも読み込めます。</p></section>
+    {% endif %}
+
+    <section id="import" class="import-panel" aria-labelledby="import-title"><h2 id="import-title" class="import-heading">CSVを追加する<span>UTF-8・Shift_JIS対応</span></h2>
+      <form action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data" class="import-form"><div><label for="csv">月単位の収入・支出CSV</label><input id="csv" name="csv" type="file" accept=".csv,text/csv" required aria-describedby="import-note"><p id="import-note">1ファイル10MBまで。追加したCSVはこのアプリのフォルダ内に保存されます。</p></div><button class="button primary" type="submit">CSVを追加</button></form>
+    </section>
+    <footer>Money <span>データとグラフは、このPC内で処理されます。</span></footer>
+  </main>
+</body>
+</html>

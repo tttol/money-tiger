@@ -1,0 +1,13 @@
+[project]
+name = "money-local"
+version = "0.1.0"
+description = "ローカルで家計CSVの月別カテゴリ比較を行うWebアプリ"
+requires-python = ">=3.12"
+dependencies = ["Flask>=3.1,<4", "Pillow>=12,<13"]
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
